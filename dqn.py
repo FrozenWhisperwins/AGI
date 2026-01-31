@@ -301,6 +301,55 @@ class DQNAgent:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
 
+    def learn(self, batch):
+        """Train policy network on a batch of experiences.
+
+        Implements the DQN learning algorithm:
+        1. Sample batch from replay buffer
+        2. Compute current Q-values using policy network
+        3. Compute target Q-values using target network
+        4. Calculate loss (MSE between current and target)
+        5. Backpropagate to update policy network
+        6. Periodically update target network
+
+        Args:
+            batch (list): List of Experience tuples
+        """
+        if len(batch) < self.batch_size:
+            return  # Not enough samples yet
+
+        # Prepare batch tensors
+        states = torch.FloatTensor([e.state for e in batch]).to(self.device)
+        actions = torch.LongTensor([self.actions.index(e.action) if isinstance(e.action, str) else e.action
+                                          for e in batch]).to(self.device)
+        rewards = torch.FloatTensor([e.reward for e in batch]).to(self.device)
+        next_states = torch.FloatTensor([e.next_state for e in batch]).to(self.device)
+        dones = torch.FloatTensor([1.0 if e.done else 0.0 for e in batch]).to(self.device)
+
+        # Current Q-values from policy network
+        with torch.no_grad():
+            current_q_values = self.policy_net(states).gather(1, actions.unsqueeze(1))
+
+        # Target Q-values from target network
+        with torch.no_grad():
+            next_q_values = self.target_net(next_states).max(1)[0].detach()
+            expected_q_values = rewards + (self.gamma * next_q_values * (1 - dones))
+
+        # Loss calculation (Mean Squared Error)
+        loss = self.criterion(current_q_values, expected_q_values.unsqueeze(1))
+
+        # Optimize the model
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        # Periodically update target network
+        self.step_count += 1
+        if self.step_count % self.target_update_frequency == 0:
+            self.update_target_network()
+
+        return loss.item()
+
 
 class StateEncoder:
     """Encodes states for neural network input.
